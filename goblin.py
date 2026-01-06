@@ -77,7 +77,7 @@ PAYMENT_KEYBOARD = ReplyKeyboardMarkup(
 
 # Notes choice keyboard
 ADD_NOTES_KEYBOARD = ReplyKeyboardMarkup(
-    [["✏️ Add a Note"], ["🚀 Skip Notes"]],
+    [["🚀 Skip Notes"], ["✏️ Add a Note"]],
     resize_keyboard=True,
     one_time_keyboard=True
 )
