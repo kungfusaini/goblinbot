@@ -19,6 +19,7 @@ EXPENSE_CONFIRM = 6
 INCOME_NAME = 7
 INCOME_AMOUNT = 8
 INCOME_CONFIRM = 9
+ADD_NOTES_CHOICE = 10
 
 # Authorized user ID from environment
 TELEGRAM_ID = os.getenv('TELEGRAM_ID')
@@ -69,6 +70,13 @@ MAIN_KEYBOARD = ReplyKeyboardMarkup(
 # Payment method keyboard
 PAYMENT_KEYBOARD = ReplyKeyboardMarkup(
     [["Credit"], ["Debit"]],
+    resize_keyboard=True,
+    one_time_keyboard=True
+)
+
+# Notes choice keyboard
+ADD_NOTES_KEYBOARD = ReplyKeyboardMarkup(
+    [["✏️ Add a Note"], ["🚀 Skip Notes"]],
     resize_keyboard=True,
     one_time_keyboard=True
 )
@@ -339,8 +347,7 @@ async def _handle_category_selection_logic(query, context, category):
         
         # Remove inline keyboard and send new message with reply keyboard
         await query.edit_message_text(
-            f"📁 Category: *{category}*\n\n"
-            "💳 Select payment method:",
+            f"📁 Category: *{category}*",
             parse_mode='Markdown'
         )
         
@@ -357,8 +364,7 @@ async def _handle_subcategory_selection_logic(query, context, subcategory):
     
     # Remove inline keyboard and send new message with reply keyboard
     await query.edit_message_text(
-        f"🏷️ Subcategory: *{subcategory}*\n\n"
-        "💳 Select payment method:",
+        f"🏷️ Subcategory: *{subcategory}*",
         parse_mode='Markdown'
     )
     
@@ -399,8 +405,7 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
     context.user_data['expense']['subcategory'] = ''
     
     await update.message.reply_text(
-        f"📁 Category: *{category}*\n\n"
-        "💳 Select payment method:",
+        f"📁 Category: *{category}*",
         reply_markup=PAYMENT_KEYBOARD,
         parse_mode='Markdown'
     )
@@ -419,17 +424,30 @@ async def handle_expense_payment(update: Update, context: ContextTypes.DEFAULT_T
     context.user_data['expense']['payment_method'] = payment
     await update.message.reply_text(
         f"💳 Payment: *{payment.title()}*\n\n"
-        "📝 Enter notes (optional, send /skip to skip):",
+        "📝 Would you like to add a note?",
+        reply_markup=ADD_NOTES_KEYBOARD,
         parse_mode='Markdown'
     )
-    return EXPENSE_NOTES
+    return ADD_NOTES_CHOICE
+
+async def handle_notes_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle notes choice"""
+    choice = update.message.text.strip()
+    
+    if "Add Note" in choice or "✏️" in choice:
+        await update.message.reply_text(
+            "📝 Please enter your note:",
+            parse_mode='Markdown'
+        )
+        return EXPENSE_NOTES
+    else:  # Skip
+        context.user_data['expense']['notes'] = ''
+        await show_expense_confirmation(update, context)
+        return EXPENSE_CONFIRM
 
 async def handle_expense_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle expense notes"""
-    if update.message.text.strip().lower() == '/skip':
-        context.user_data['expense']['notes'] = ''
-    else:
-        context.user_data['expense']['notes'] = update.message.text.strip()
+    context.user_data['expense']['notes'] = update.message.text.strip()
     
     # Show confirmation
     await show_expense_confirmation(update, context)
@@ -449,6 +467,8 @@ async def show_expense_confirmation(update: Update, context: ContextTypes.DEFAUL
     
     if exp['notes']:
         confirmation_text += f"📝 Notes: {exp['notes']}\n"
+    else:
+        confirmation_text += "📝 Notes: None\n"
     
     confirmation_text += "\n✅ Confirm or ❌ Cancel?"
     
@@ -619,6 +639,7 @@ def main():
             EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)],
             EXPENSE_CATEGORY: [CallbackQueryHandler(handle_selection), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
             EXPENSE_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_payment)],
+            ADD_NOTES_CHOICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_notes_choice)],
             EXPENSE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_notes)],
             EXPENSE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_confirm)],
             INCOME_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_name)],
