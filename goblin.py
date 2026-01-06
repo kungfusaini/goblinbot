@@ -245,11 +245,63 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         return EXPENSE_CATEGORY
     
     category = query.data.replace("cat_", "")
-    context.user_data['expense']['category'] = category
-    context.user_data['expense']['subcategory'] = ''  # Empty for now
+    
+    # Get categories to check for subcategories
+    api_key = context.bot_data.get('api_key')
+    headers = get_headers(api_key)
+    categories_data = await get_categories(headers)
+    
+    if categories_data and categories_data.get('categories', {}).get(category):
+        # Category has subcategories, show them
+        subcategories = categories_data['categories'][category]
+        keyboard = []
+        
+        for subcategory in subcategories:
+            keyboard.append([{"text": subcategory, "callback_data": f"sub_{subcategory}"}])
+        
+        keyboard.append([{"text": "📝 Other (specify subcategory)", "callback_data": "other_subcategory"}])
+        
+        reply_markup = {"inline_keyboard": keyboard}
+        await query.edit_message_text(
+            f"📁 Category: *{category}*\n\n"
+            f"🏷️ Select subcategory:",
+            reply_markup=reply_markup,
+            parse_mode='Markdown'
+        )
+        
+        # Store selected category
+        context.user_data['expense']['category'] = category
+        return EXPENSE_CATEGORY
+    else:
+        # No subcategories, proceed to payment method
+        context.user_data['expense']['category'] = category
+        context.user_data['expense']['subcategory'] = ''
+        
+        await query.edit_message_text(
+            f"📁 Category: *{category}*\n\n"
+            "💳 Select payment method:",
+            reply_markup=PAYMENT_KEYBOARD,
+            parse_mode='Markdown'
+        )
+        return EXPENSE_PAYMENT
+
+async def handle_subcategory_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle subcategory selection via callback query"""
+    query = update.callback_query
+    await query.answer()
+    
+    if query.data == "other_subcategory":
+        await query.edit_message_text(
+            "📝 Please enter subcategory name:",
+            parse_mode='Markdown'
+        )
+        return EXPENSE_CATEGORY
+    
+    subcategory = query.data.replace("sub_", "")
+    context.user_data['expense']['subcategory'] = subcategory
     
     await query.edit_message_text(
-        f"📁 Category: *{category}*\n\n"
+        f"🏷️ Subcategory: *{subcategory}*\n\n"
         "💳 Select payment method:",
         reply_markup=PAYMENT_KEYBOARD,
         parse_mode='Markdown'
@@ -487,7 +539,7 @@ def main():
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_selection)],
             EXPENSE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_name)],
             EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)],
-            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_category_selection), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
+            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_category_selection), CallbackQueryHandler(handle_subcategory_selection), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
             EXPENSE_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_payment)],
             EXPENSE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_notes)],
             EXPENSE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_confirm)],
