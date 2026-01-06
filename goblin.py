@@ -6,6 +6,7 @@ import requests
 import csv
 from datetime import datetime
 from telegram import Update, ReplyKeyboardMarkup
+from telegram.helpers import escape_markdown
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes, ConversationHandler, CallbackQueryHandler
 
 # States for conversation
@@ -312,7 +313,7 @@ async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     elif data == "other_subcategory":
         return await _handle_other_subcategory_logic(query, context)
 
-async def _handle_category_selection_logic(query, context, category):
+async def _handle_category_selection_logic(query: Update, context: ContextTypes.DEFAULT_TYPE, category: str) -> int:
     """Handle category selection logic"""
     # Get categories to check for subcategories
     api_key = context.bot_data.get('api_key')
@@ -358,7 +359,7 @@ async def _handle_category_selection_logic(query, context, category):
         )
         return EXPENSE_PAYMENT
 
-async def _handle_subcategory_selection_logic(query, context, subcategory):
+async def _handle_subcategory_selection_logic(query: Update, context: ContextTypes.DEFAULT_TYPE, subcategory: str) -> int:
     """Handle subcategory selection logic"""
     context.user_data['expense']['subcategory'] = subcategory
     
@@ -375,7 +376,7 @@ async def _handle_subcategory_selection_logic(query, context, subcategory):
     )
     return EXPENSE_PAYMENT
 
-async def _handle_other_category_logic(query, context):
+async def _handle_other_category_logic(query: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle other category logic"""
     await query.edit_message_text(
         "📝 Please enter category name:",
@@ -383,8 +384,9 @@ async def _handle_other_category_logic(query, context):
     )
     return EXPENSE_CATEGORY
 
-async def _handle_other_subcategory_logic(query, context):
+async def _handle_other_subcategory_logic(query: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle other subcategory logic"""
+    context.user_data['is_entering_subcategory'] = True
     await query.edit_message_text(
         "📝 Please enter subcategory name:",
         parse_mode='Markdown'
@@ -393,7 +395,31 @@ async def _handle_other_subcategory_logic(query, context):
 
 async def handle_expense_category_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle manual category entry"""
-    category = update.message.text.strip()
+    text = update.message.text.strip()
+    
+    # Check if this is actually a subcategory entry
+    if context.user_data.get('is_entering_subcategory'):
+        # This is subcategory, not category
+        subcategory = text
+        if len(subcategory) == 0 or len(subcategory) > 50:
+            await update.message.reply_text(
+                "❌ Subcategory must be 1-50 characters. Please try again:",
+                parse_mode='Markdown'
+            )
+            return EXPENSE_CATEGORY
+        
+        context.user_data['expense']['subcategory'] = subcategory
+        context.user_data['is_entering_subcategory'] = False
+        
+        await update.message.reply_text(
+            f"🏷️ Subcategory: *{escape_markdown(subcategory)}*",
+            reply_markup=PAYMENT_KEYBOARD,
+            parse_mode='Markdown'
+        )
+        return EXPENSE_PAYMENT
+    
+    # Normal category entry
+    category = text
     if len(category) == 0 or len(category) > 50:
         await update.message.reply_text(
             "❌ Category must be 1-50 characters. Please try again:",
@@ -405,7 +431,7 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
     context.user_data['expense']['subcategory'] = ''
     
     await update.message.reply_text(
-        f"📁 Category: *{category}*",
+        f"📁 Category: *{escape_markdown(category)}*",
         reply_markup=PAYMENT_KEYBOARD,
         parse_mode='Markdown'
     )
@@ -453,20 +479,25 @@ async def handle_expense_notes(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_expense_confirmation(update, context)
     return EXPENSE_CONFIRM
 
-async def show_expense_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_expense_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show expense confirmation"""
     exp = context.user_data['expense']
     confirmation_text = (
         f"🔍 *Confirm Expense*\n\n"
         f"📅 Date: {exp['date']}\n"
-        f"📝 Name: {exp['name']}\n"
+        f"📝 Name: {escape_markdown(exp['name'])}\n"
         f"💰 Amount: ${exp['amount']:.2f}\n"
-        f"📁 Category: {exp['category']}\n"
+        f"📁 Category: {escape_markdown(exp['category'])}\n"
         f"💳 Payment: {exp['payment_method'].title()}\n"
     )
     
+    if exp.get('subcategory'):
+        confirmation_text += f"🏷️ Subcategory: {escape_markdown(exp['subcategory'])}\n"
+    else:
+        confirmation_text += "🏷️ Subcategory: None\n"
+    
     if exp['notes']:
-        confirmation_text += f"📝 Notes: {exp['notes']}\n"
+        confirmation_text += f"📝 Notes: {escape_markdown(exp['notes'])}\n"
     else:
         confirmation_text += "📝 Notes: None\n"
     
@@ -489,19 +520,24 @@ async def handle_expense_confirm(update: Update, context: ContextTypes.DEFAULT_T
         status_code, response = add_expense(exp, headers)
         
         if status_code in [200, 201]:
+            msg = "✅ *Expense added successfully!*\n\n"
+            msg += f"💸 ${exp['amount']:.2f} - {escape_markdown(exp['name'])}\n"
+            msg += f"📁 {escape_markdown(exp['category'])}"
+            
+            if exp.get('subcategory'):
+                msg += f" 🏷️ {escape_markdown(exp['subcategory'])}"
+                
+            msg += "\n\nBack to main menu:"
+            
             await update.message.reply_text(
-                f"✅ *Expense added successfully!*\n\n"
-                f"💸 ${exp['amount']:.2f} - {exp['name']}\n"
-                f"📁 {exp['category']}\n\n"
-                f"Back to main menu:",
+                msg,
                 reply_markup=MAIN_KEYBOARD,
                 parse_mode='Markdown'
             )
         else:
+            error_text = escape_markdown(str(response.get('error', 'Unknown error')))
             await update.message.reply_text(
-                f"❌ *Failed to add expense*\n\n"
-                f"Error: {response.get('error', 'Unknown error')}\n\n"
-                f"Please try again.",
+                f"❌ *Failed to add expense*\n\nError: {error_text}\n\nPlease try again.",
                 reply_markup=MAIN_KEYBOARD,
                 parse_mode='Markdown'
             )
@@ -553,13 +589,13 @@ async def handle_income_amount(update: Update, context: ContextTypes.DEFAULT_TYP
     await show_income_confirmation(update, context)
     return INCOME_CONFIRM
 
-async def show_income_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def show_income_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show income confirmation"""
     income = context.user_data['income']
     confirmation_text = (
         f"🔍 *Confirm Income*\n\n"
         f"📅 Date: {income['date']}\n"
-        f"📝 Name: {income['name']}\n"
+        f"📝 Name: {escape_markdown(income['name'])}\n"
         f"💰 Amount: ${income['amount']:.2f}\n\n"
         f"✅ Confirm or ❌ Cancel?"
     )
