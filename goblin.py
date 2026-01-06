@@ -337,8 +337,14 @@ async def _handle_category_selection_logic(query, context, category):
         context.user_data['expense']['category'] = category
         context.user_data['expense']['subcategory'] = ''
         
+        # Remove inline keyboard and send new message with reply keyboard
         await query.edit_message_text(
             f"📁 Category: *{category}*\n\n"
+            "💳 Select payment method:",
+            parse_mode='Markdown'
+        )
+        
+        await query.message.reply_text(
             "💳 Select payment method:",
             reply_markup=PAYMENT_KEYBOARD,
             parse_mode='Markdown'
@@ -349,8 +355,14 @@ async def _handle_subcategory_selection_logic(query, context, subcategory):
     """Handle subcategory selection logic"""
     context.user_data['expense']['subcategory'] = subcategory
     
+    # Remove inline keyboard and send new message with reply keyboard
     await query.edit_message_text(
         f"🏷️ Subcategory: *{subcategory}*\n\n"
+        "💳 Select payment method:",
+        parse_mode='Markdown'
+    )
+    
+    await query.message.reply_text(
         "💳 Select payment method:",
         reply_markup=PAYMENT_KEYBOARD,
         parse_mode='Markdown'
