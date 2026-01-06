@@ -20,6 +20,45 @@ INCOME_NAME = 7
 INCOME_AMOUNT = 8
 INCOME_CONFIRM = 9
 
+# Authorized user ID from environment
+TELEGRAM_ID = os.getenv('TELEGRAM_ID')
+if not TELEGRAM_ID:
+    print("Error: TELEGRAM_ID environment variable not set")
+    sys.exit(1)
+AUTHORIZED_USER_ID = int(TELEGRAM_ID)
+
+def authorize_user(handler_func):
+    """Decorator to authorize user before running handler"""
+    async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
+        user_id = None
+        if update.effective_user:
+            user_id = update.effective_user.id
+        elif update.message and update.message.from_user:
+            user_id = update.message.from_user.id
+        elif update.callback_query and update.callback_query.from_user:
+            user_id = update.callback_query.from_user.id
+        
+        if user_id != AUTHORIZED_USER_ID:
+            try:
+                if update.message:
+                    await update.message.reply_text(
+                        "❌ Access denied. This bot is private and not available for public use.",
+                        parse_mode='Markdown'
+                    )
+                elif update.callback_query:
+                    await update.callback_query.answer(
+                        "❌ Access denied. This bot is private and not available for public use.",
+                        show_alert=True
+                    )
+            except:
+                pass
+            if 'ConversationHandler' in str(type(handler_func)):
+                return ConversationHandler.END
+            return
+        
+        return await handler_func(update, context, *args, **kwargs)
+    return wrapper
+
 # Main menu keyboard
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
     [["💸 Add Expense"], ["💰 Add Income"]],
@@ -123,6 +162,7 @@ def validate_amount(amount_str):
     except ValueError:
         return False, "Invalid amount format"
 
+@authorize_user
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the bot and show main menu"""
     await update.message.reply_text(
@@ -134,6 +174,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     )
     return MAIN_MENU
 
+@authorize_user
 async def handle_menu_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle main menu selection"""
     text = update.message.text.strip()
@@ -521,6 +562,7 @@ async def handle_income_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.clear()
         return MAIN_MENU
 
+@authorize_user
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel current operation"""
     await update.message.reply_text(
