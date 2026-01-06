@@ -283,27 +283,29 @@ async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TY
     )
     return EXPENSE_CATEGORY
 
-async def handle_category_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle category selection via callback query"""
+async def handle_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle all category/subcategory selections via callback query"""
     query = update.callback_query
     await query.answer()
     
-    if query.data == "other_category":
-        await query.edit_message_text(
-            "📝 Please enter category name:",
-            parse_mode='Markdown'
-        )
-        return EXPENSE_CATEGORY
+    data = query.data
     
-    if query.data == "other_subcategory":
-        await query.edit_message_text(
-            "📝 Please enter subcategory name:",
-            parse_mode='Markdown'
-        )
-        return EXPENSE_CATEGORY
-    
-    category = query.data.replace("cat_", "")
-    
+    if data.startswith("cat_"):
+        category = data.replace("cat_", "")
+        return await _handle_category_selection_logic(query, context, category)
+        
+    elif data.startswith("sub_"):
+        subcategory = data.replace("sub_", "")
+        return await _handle_subcategory_selection_logic(query, context, subcategory)
+        
+    elif data == "other_category":
+        return await _handle_other_category_logic(query, context)
+        
+    elif data == "other_subcategory":
+        return await _handle_other_subcategory_logic(query, context)
+
+async def _handle_category_selection_logic(query, context, category):
+    """Handle category selection logic"""
     # Get categories to check for subcategories
     api_key = context.bot_data.get('api_key')
     headers = get_headers(api_key)
@@ -343,12 +345,8 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         )
         return EXPENSE_PAYMENT
 
-async def handle_subcategory_selection(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handle subcategory selection via callback query"""
-    query = update.callback_query
-    await query.answer()
-    
-    subcategory = query.data.replace("sub_", "")
+async def _handle_subcategory_selection_logic(query, context, subcategory):
+    """Handle subcategory selection logic"""
     context.user_data['expense']['subcategory'] = subcategory
     
     await query.edit_message_text(
@@ -358,6 +356,22 @@ async def handle_subcategory_selection(update: Update, context: ContextTypes.DEF
         parse_mode='Markdown'
     )
     return EXPENSE_PAYMENT
+
+async def _handle_other_category_logic(query, context):
+    """Handle other category logic"""
+    await query.edit_message_text(
+        "📝 Please enter category name:",
+        parse_mode='Markdown'
+    )
+    return EXPENSE_CATEGORY
+
+async def _handle_other_subcategory_logic(query, context):
+    """Handle other subcategory logic"""
+    await query.edit_message_text(
+        "📝 Please enter subcategory name:",
+        parse_mode='Markdown'
+    )
+    return EXPENSE_CATEGORY
 
 async def handle_expense_category_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle manual category entry"""
@@ -591,7 +605,7 @@ def main():
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_selection)],
             EXPENSE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_name)],
             EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)],
-            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_category_selection, pattern='^cat_'), CallbackQueryHandler(handle_subcategory_selection, pattern='^sub_'), CallbackQueryHandler(handle_category_selection, pattern='^(other_category|other_subcategory)$'), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
+            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_selection), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
             EXPENSE_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_payment)],
             EXPENSE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_notes)],
             EXPENSE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_confirm)],
