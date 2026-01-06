@@ -212,7 +212,14 @@ async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TY
     
     # Create inline keyboard for categories
     keyboard = []
-    for category in categories.keys():
+    if not categories.get('categories'):
+        await update.message.reply_text(
+            "❌ Invalid categories response. Please try again later.",
+            reply_markup=MAIN_KEYBOARD
+        )
+        return MAIN_MENU
+    
+    for category in categories['categories'].keys():
         keyboard.append([{"text": category, "callback_data": f"cat_{category}"}])
     
     # Add "Other" option
