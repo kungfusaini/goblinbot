@@ -171,6 +171,32 @@ def validate_amount(amount_str):
     except ValueError:
         return False, "Invalid amount format"
 
+def create_category_if_needed(category, headers, subcategory=None):
+    """Create category or subcategory if they don't exist"""
+    try:
+        if subcategory:
+            # Create subcategory
+            response = requests.post(
+                "https://vulkan.sumeetsaini.com/vault/categories",
+                json={'category': category, 'subcategory': subcategory},
+                headers=headers,
+                timeout=30
+            )
+            return response.status_code == 201, response.status_code, response.text
+        else:
+            # Create category
+            response = requests.post(
+                "https://vulkan.sumeetsaini.com/vault/categories",
+                json={'category': category},
+                headers=headers,
+                timeout=30
+            )
+            return response.status_code == 201, response.status_code, response.text
+    except requests.exceptions.Timeout:
+        return False, 0, "Request timeout - please try again"
+    except Exception as e:
+        return False, 0, f"Network error: {str(e)}"
+
 @authorize_user
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the bot and show main menu"""
@@ -396,6 +422,8 @@ async def _handle_other_subcategory_logic(query: Update, context: ContextTypes.D
 async def handle_expense_category_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle manual category entry"""
     text = update.message.text.strip()
+    api_key = context.bot_data.get('api_key')
+    headers = get_headers(api_key)
     
     # Check if this is actually a subcategory entry
     if context.user_data.get('is_entering_subcategory'):
@@ -408,15 +436,41 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
             )
             return EXPENSE_CATEGORY
         
-        context.user_data['expense']['subcategory'] = subcategory
-        context.user_data['is_entering_subcategory'] = False
+        # Get the current category for subcategory creation
+        current_category = context.user_data['expense'].get('category', '')
+        if not current_category:
+            await update.message.reply_text(
+                "❌ Error: No category selected. Please start over.",
+                reply_markup=MAIN_KEYBOARD,
+                parse_mode='Markdown'
+            )
+            return MAIN_MENU
         
-        await update.message.reply_text(
-            f"🏷️ Subcategory: *{escape_markdown(subcategory)}*",
-            reply_markup=PAYMENT_KEYBOARD,
-            parse_mode='Markdown'
+        # Create the subcategory
+        success, status_code, response_text = create_category_if_needed(
+            current_category, headers, subcategory
         )
-        return EXPENSE_PAYMENT
+        
+        if success:
+            context.user_data['expense']['subcategory'] = subcategory
+            context.user_data['is_entering_subcategory'] = False
+            
+            await update.message.reply_text(
+                f"✅ Subcategory '*{escape_markdown(subcategory)}*' created successfully!\n\n"
+                f"📁 Category: *{escape_markdown(current_category)}*\n"
+                f"🏷️ Subcategory: *{escape_markdown(subcategory)}*",
+                reply_markup=PAYMENT_KEYBOARD,
+                parse_mode='Markdown'
+            )
+            return EXPENSE_PAYMENT
+        else:
+            await update.message.reply_text(
+                f"❌ Failed to create subcategory '{escape_markdown(subcategory)}'.\n"
+                f"Error: {escape_markdown(response_text)}\n\n"
+                f"Please try a different name:",
+                parse_mode='Markdown'
+            )
+            return EXPENSE_CATEGORY
     
     # Normal category entry
     category = text
@@ -427,15 +481,34 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
         )
         return EXPENSE_CATEGORY
     
-    context.user_data['expense']['category'] = category
-    context.user_data['expense']['subcategory'] = ''
+    # Create the category
+    success, status_code, response_text = create_category_if_needed(category, headers)
     
-    await update.message.reply_text(
-        f"📁 Category: *{escape_markdown(category)}*",
-        reply_markup=PAYMENT_KEYBOARD,
-        parse_mode='Markdown'
-    )
-    return EXPENSE_PAYMENT
+    if success:
+        context.user_data['expense']['category'] = category
+        context.user_data['expense']['subcategory'] = ''
+        
+        await update.message.reply_text(
+            f"✅ Category '*{escape_markdown(category)}*' created successfully!",
+            reply_markup=PAYMENT_KEYBOARD,
+            parse_mode='Markdown'
+        )
+        
+        # Check if we should ask for subcategory or proceed to payment
+        await update.message.reply_text(
+            "💳 Select payment method:",
+            reply_markup=PAYMENT_KEYBOARD,
+            parse_mode='Markdown'
+        )
+        return EXPENSE_PAYMENT
+    else:
+        await update.message.reply_text(
+            f"❌ Failed to create category '{escape_markdown(category)}'.\n"
+            f"Error: {escape_markdown(response_text)}\n\n"
+            f"Please try a different name:",
+            parse_mode='Markdown'
+        )
+        return EXPENSE_CATEGORY
 
 async def handle_expense_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle payment method selection"""
@@ -536,11 +609,22 @@ async def handle_expense_confirm(update: Update, context: ContextTypes.DEFAULT_T
             )
         else:
             error_text = escape_markdown(str(response.get('error', 'Unknown error')))
-            await update.message.reply_text(
-                f"❌ *Failed to add expense*\n\nError: {error_text}\n\nPlease try again.",
-                reply_markup=MAIN_KEYBOARD,
-                parse_mode='Markdown'
-            )
+            # Check if this is a category/subcategory related error
+            if 'category' in error_text.lower() or 'subcategory' in error_text.lower():
+                await update.message.reply_text(
+                    f"❌ *Failed to add expense - Category Issue*\n\n"
+                    f"Error: {error_text}\n\n"
+                    f"The category or subcategory may not exist. "
+                    f"Please try selecting existing categories or creating new ones.",
+                    reply_markup=MAIN_KEYBOARD,
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    f"❌ *Failed to add expense*\n\nError: {error_text}\n\nPlease try again.",
+                    reply_markup=MAIN_KEYBOARD,
+                    parse_mode='Markdown'
+                )
         
         context.user_data.clear()
         return MAIN_MENU
