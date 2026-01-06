@@ -454,6 +454,7 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
         if success:
             context.user_data['expense']['subcategory'] = subcategory
             context.user_data['is_entering_subcategory'] = False
+            context.user_data['new_category_mode'] = False
             
             await update.message.reply_text(
                 f"✅ Subcategory '*{escape_markdown(subcategory)}*' created successfully!\n\n"
@@ -487,20 +488,15 @@ async def handle_expense_category_text(update: Update, context: ContextTypes.DEF
     if success:
         context.user_data['expense']['category'] = category
         context.user_data['expense']['subcategory'] = ''
+        context.user_data['is_entering_subcategory'] = True
+        context.user_data['new_category_mode'] = True
         
         await update.message.reply_text(
-            f"✅ Category '*{escape_markdown(category)}*' created successfully!",
-            reply_markup=PAYMENT_KEYBOARD,
+            f"✅ Category '*{escape_markdown(category)}*' created successfully!\n\n"
+            f"🏷️ Now please enter a subcategory for this category:",
             parse_mode='Markdown'
         )
-        
-        # Check if we should ask for subcategory or proceed to payment
-        await update.message.reply_text(
-            "💳 Select payment method:",
-            reply_markup=PAYMENT_KEYBOARD,
-            parse_mode='Markdown'
-        )
-        return EXPENSE_PAYMENT
+        return EXPENSE_CATEGORY
     else:
         await update.message.reply_text(
             f"❌ Failed to create category '{escape_markdown(category)}'.\n"
