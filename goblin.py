@@ -63,39 +63,49 @@ def get_headers(api_key):
         'Content-Type': 'application/json'
     }
 
-async def add_expense(data, headers):
+def add_expense(data, headers):
     """Add expense to API"""
     try:
         response = requests.post(
             "https://vulkan.sumeetsaini.com/vault/spend",
             json=data,
-            headers=headers
+            headers=headers,
+            timeout=30
         )
         return response.status_code, response.json()
+    except requests.exceptions.Timeout:
+        return 0, {"error": "Request timeout - please try again"}
     except Exception as e:
         return 0, {"error": f"Network error: {str(e)}"}
 
-async def add_income(data, headers):
+def add_income(data, headers):
     """Add income to API"""
     try:
         response = requests.post(
             "https://vulkan.sumeetsaini.com/vault/income",
             json=data,
-            headers=headers
+            headers=headers,
+            timeout=30
         )
         return response.status_code, response.json()
+    except requests.exceptions.Timeout:
+        return 0, {"error": "Request timeout - please try again"}
     except Exception as e:
         return 0, {"error": f"Network error: {str(e)}"}
 
-async def get_categories(headers):
+def get_categories(headers):
     """Get categories from API"""
     try:
         response = requests.get(
             "https://vulkan.sumeetsaini.com/vault/categories",
-            headers=headers
+            headers=headers,
+            timeout=30
         )
         if response.status_code == 200:
             return response.json()
+        return None
+    except requests.exceptions.Timeout:
+        print("Error getting categories: Request timeout")
         return None
     except Exception as e:
         print(f"Error getting categories: {e}")
@@ -201,7 +211,7 @@ async def handle_expense_amount(update: Update, context: ContextTypes.DEFAULT_TY
     # Show category selection
     api_key = context.bot_data.get('api_key')
     headers = get_headers(api_key)
-    categories = await get_categories(headers)
+    categories = get_categories(headers)
     
     if not categories:
         await update.message.reply_text(
@@ -244,12 +254,19 @@ async def handle_category_selection(update: Update, context: ContextTypes.DEFAUL
         )
         return EXPENSE_CATEGORY
     
+    if query.data == "other_subcategory":
+        await query.edit_message_text(
+            "📝 Please enter subcategory name:",
+            parse_mode='Markdown'
+        )
+        return EXPENSE_CATEGORY
+    
     category = query.data.replace("cat_", "")
     
     # Get categories to check for subcategories
     api_key = context.bot_data.get('api_key')
     headers = get_headers(api_key)
-    categories_data = await get_categories(headers)
+    categories_data = get_categories(headers)
     
     if categories_data and categories_data.get('categories', {}).get(category):
         # Category has subcategories, show them
@@ -289,13 +306,6 @@ async def handle_subcategory_selection(update: Update, context: ContextTypes.DEF
     """Handle subcategory selection via callback query"""
     query = update.callback_query
     await query.answer()
-    
-    if query.data == "other_subcategory":
-        await query.edit_message_text(
-            "📝 Please enter subcategory name:",
-            parse_mode='Markdown'
-        )
-        return EXPENSE_CATEGORY
     
     subcategory = query.data.replace("sub_", "")
     context.user_data['expense']['subcategory'] = subcategory
@@ -389,7 +399,7 @@ async def handle_expense_confirm(update: Update, context: ContextTypes.DEFAULT_T
         api_key = context.bot_data.get('api_key')
         headers = get_headers(api_key)
         
-        status_code, response = await add_expense(exp, headers)
+        status_code, response = add_expense(exp, headers)
         
         if status_code in [200, 201]:
             await update.message.reply_text(
@@ -481,7 +491,7 @@ async def handle_income_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         api_key = context.bot_data.get('api_key')
         headers = get_headers(api_key)
         
-        status_code, response = await add_income(income, headers)
+        status_code, response = add_income(income, headers)
         
         if status_code in [200, 201]:
             await update.message.reply_text(
@@ -539,7 +549,7 @@ def main():
             MAIN_MENU: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu_selection)],
             EXPENSE_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_name)],
             EXPENSE_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_amount)],
-            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_category_selection), CallbackQueryHandler(handle_subcategory_selection), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
+            EXPENSE_CATEGORY: [CallbackQueryHandler(handle_category_selection, pattern='^cat_'), CallbackQueryHandler(handle_subcategory_selection, pattern='^sub_'), CallbackQueryHandler(handle_category_selection, pattern='^(other_category|other_subcategory)$'), MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_category_text)],
             EXPENSE_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_payment)],
             EXPENSE_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_notes)],
             EXPENSE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_expense_confirm)],
