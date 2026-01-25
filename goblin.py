@@ -21,6 +21,11 @@ INCOME_NAME = 7
 INCOME_AMOUNT = 8
 INCOME_CONFIRM = 9
 ADD_NOTES_CHOICE = 10
+BUSINESS_NAME = 11
+BUSINESS_AMOUNT = 12
+BUSINESS_PAYMENT = 13
+BUSINESS_NOTES = 14
+BUSINESS_CONFIRM = 15
 
 # Authorized user ID from environment
 TELEGRAM_ID = os.getenv('TELEGRAM_ID')
@@ -63,7 +68,7 @@ def authorize_user(handler_func):
 
 # Main menu keyboard
 MAIN_KEYBOARD = ReplyKeyboardMarkup(
-    [["💸 Add Expense"], ["💰 Add Income"]],
+    [["💸 Add Expense"], ["💰 Add Income"], ["💼 Add Business"]],
     resize_keyboard=True,
     one_time_keyboard=False
 )
@@ -131,6 +136,21 @@ def add_income(data, headers):
     try:
         response = requests.post(
             "https://vulkan.sumeetsaini.com/vault/income",
+            json=data,
+            headers=headers,
+            timeout=30
+        )
+        return response.status_code, response.json()
+    except requests.exceptions.Timeout:
+        return 0, {"error": "Request timeout - please try again"}
+    except Exception as e:
+        return 0, {"error": f"Network error: {str(e)}"}
+
+def add_business(data, headers):
+    """Add business expense to API"""
+    try:
+        response = requests.post(
+            "https://vulkan.sumeetsaini.com/vault/business",
             json=data,
             headers=headers,
             timeout=30
@@ -244,6 +264,22 @@ async def handle_menu_selection(update: Update, context: ContextTypes.DEFAULT_TY
             parse_mode='Markdown'
         )
         return INCOME_NAME
+    
+    elif text == "💼 Add Business":
+        # Start business flow with today's date
+        context.user_data['business'] = {
+            'date': datetime.now().strftime('%Y-%m-%d'),
+            'name': '',
+            'amount': '',
+            'payment_method': '',
+            'notes': ''
+        }
+        await update.message.reply_text(
+            f"📅 *Date: {context.user_data['business']['date']}*\n\n"
+            "📝 Enter business expense name/description:",
+            parse_mode='Markdown'
+        )
+        return BUSINESS_NAME
     
     else:
         await update.message.reply_text(
@@ -529,16 +565,24 @@ async def handle_notes_choice(update: Update, context: ContextTypes.DEFAULT_TYPE
     """Handle notes choice"""
     choice = update.message.text.strip()
     
+    # Check if we're in business flow or expense flow
+    is_business = 'business' in context.user_data
+    
     if "Add Note" in choice or "✏️" in choice:
         await update.message.reply_text(
             "📝 Please enter your note:",
             parse_mode='Markdown'
         )
-        return EXPENSE_NOTES
+        return BUSINESS_NOTES if is_business else EXPENSE_NOTES
     else:  # Skip
-        context.user_data['expense']['notes'] = ''
-        await show_expense_confirmation(update, context)
-        return EXPENSE_CONFIRM
+        if is_business:
+            context.user_data['business']['notes'] = ''
+            await show_business_confirmation(update, context)
+            return BUSINESS_CONFIRM
+        else:
+            context.user_data['expense']['notes'] = ''
+            await show_expense_confirmation(update, context)
+            return EXPENSE_CONFIRM
 
 async def handle_expense_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle expense notes"""
@@ -724,6 +768,138 @@ async def handle_income_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data.clear()
         return MAIN_MENU
 
+async def handle_business_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle business name input"""
+    name = update.message.text.strip()
+    if len(name) == 0 or len(name) > 100:
+        await update.message.reply_text(
+            "❌ Name must be between 1-100 characters. Please try again:",
+            parse_mode='Markdown'
+        )
+        return BUSINESS_NAME
+    
+    context.user_data['business']['name'] = name
+    await update.message.reply_text(
+        f"✅ Name: *{name}*\n\n"
+        "💰 Enter amount:",
+        parse_mode='Markdown'
+    )
+    return BUSINESS_AMOUNT
+
+async def handle_business_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle business amount input"""
+    amount_str = update.message.text.strip()
+    valid, result = validate_amount(amount_str)
+    
+    if not valid:
+        await update.message.reply_text(
+            f"❌ {result}. Please enter amount again:",
+            parse_mode='Markdown'
+        )
+        return BUSINESS_AMOUNT
+    
+    context.user_data['business']['amount'] = result
+    await update.message.reply_text(
+        "💳 Select payment method:",
+        reply_markup=PAYMENT_KEYBOARD,
+        parse_mode='Markdown'
+    )
+    return BUSINESS_PAYMENT
+
+async def handle_business_payment(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle business payment method selection"""
+    payment = update.message.text.strip().lower()
+    if payment not in ['credit', 'debit']:
+        await update.message.reply_text(
+            "❌ Please select Credit or Debit:",
+            reply_markup=PAYMENT_KEYBOARD
+        )
+        return BUSINESS_PAYMENT
+    
+    context.user_data['business']['payment_method'] = payment
+    await update.message.reply_text(
+        f"💳 Payment: *{payment.title()}*\n\n"
+        "📝 Would you like to add a note?",
+        reply_markup=ADD_NOTES_KEYBOARD,
+        parse_mode='Markdown'
+    )
+    return ADD_NOTES_CHOICE
+
+async def handle_business_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle business notes"""
+    context.user_data['business']['notes'] = update.message.text.strip()
+    
+    # Show confirmation
+    await show_business_confirmation(update, context)
+    return BUSINESS_CONFIRM
+
+async def show_business_confirmation(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show business transaction confirmation"""
+    business = context.user_data['business']
+    confirmation_text = (
+        f"🔍 *Confirm Business Expense*\n\n"
+        f"📅 Date: {business['date']}\n"
+        f"📝 Name: {escape_markdown(business['name'])}\n"
+        f"💰 Amount: ${business['amount']:.2f}\n"
+        f"💳 Payment: {business['payment_method'].title()}\n"
+    )
+    
+    if business['notes']:
+        confirmation_text += f"📝 Notes: {escape_markdown(business['notes'])}\n"
+    else:
+        confirmation_text += "📝 Notes: None\n"
+    
+    confirmation_text += "\n✅ Confirm or ❌ Cancel?"
+    
+    await update.message.reply_text(
+        confirmation_text,
+        reply_markup=CONFIRM_KEYBOARD,
+        parse_mode='Markdown'
+    )
+
+async def handle_business_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle business confirmation"""
+    if update.message.text.strip() == "✅ Confirm":
+        business = context.user_data['business']
+        
+        api_key = context.bot_data.get('api_key')
+        headers = get_headers(api_key)
+        
+        status_code, response = add_business(business, headers)
+        
+        if status_code in [200, 201]:
+            msg = "✅ *Business expense added successfully!*\n\n"
+            msg += f"💸 ${business['amount']:.2f} - {escape_markdown(business['name'])}\n"
+            msg += f"💳 {business['payment_method'].title()}"
+                
+            msg += "\n\nBack to main menu:"
+            
+            await update.message.reply_text(
+                msg,
+                reply_markup=MAIN_KEYBOARD,
+                parse_mode='Markdown'
+            )
+        else:
+            error_text = escape_markdown(str(response.get('error', 'Unknown error')))
+            await update.message.reply_text(
+                f"❌ *Failed to add business expense*\n\n"
+                f"Error: {error_text}\n\n"
+                f"Please try again.",
+                reply_markup=MAIN_KEYBOARD,
+                parse_mode='Markdown'
+            )
+        
+        context.user_data.clear()
+        return MAIN_MENU
+    else:
+        await update.message.reply_text(
+            "❌ Business expense cancelled.\n\n"
+            "Back to main menu:",
+            reply_markup=MAIN_KEYBOARD
+        )
+        context.user_data.clear()
+        return MAIN_MENU
+
 @authorize_user
 async def cancel_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel current operation"""
@@ -761,6 +937,11 @@ def main():
             INCOME_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_name)],
             INCOME_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_amount)],
             INCOME_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_income_confirm)],
+            BUSINESS_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_business_name)],
+            BUSINESS_AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_business_amount)],
+            BUSINESS_PAYMENT: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_business_payment)],
+            BUSINESS_NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_business_notes)],
+            BUSINESS_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_business_confirm)],
         },
         fallbacks=[CommandHandler('cancel', cancel_command)],
         per_user=True,
